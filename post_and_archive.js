@@ -116,9 +116,7 @@ const puppeteer = require('puppeteer');
 
     let posted = false;
     for (let attempt = 0; attempt < 8; ++attempt) {
-      // Try robust explicit selector FIRST:
       let enabledBtn = await page.$('div[data-testid="tweetButton"][role="button"]:not([aria-disabled="true"]), button[data-testid="tweetButton"]:not([aria-disabled="true"])');
-    
       // Fallback: Try your old way (scan for visible Post/Tweet text)
       if (!enabledBtn) {
         const btnEls = await page.$$('div[role="button"],button');
