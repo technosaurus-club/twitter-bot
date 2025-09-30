@@ -126,11 +126,12 @@ const puppeteer = require('puppeteer');
           break;
         }
       }
+      let enabledBtn = await page.$('div[data-testid="tweetButton"][role="button"]:not([aria-disabled="true"]), button[data-testid="tweetButton"]:not([aria-disabled="true"])');
       if (enabledBtn) {
-        await enabledBtn.click();
-        posted = true;
-        await page.screenshot({path: '/tmp/twitter_after_post_click.png'});
-        break;
+          await enabledBtn.click();
+          posted = true;
+          await page.screenshot({path: '/tmp/twitter_after_post_click.png'});
+          break;
       }
       console.log(`Attempt ${attempt+1}: No enabled Post/Tweet button found, retrying…`);
       await sleep(2000);
