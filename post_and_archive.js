@@ -116,22 +116,27 @@ const puppeteer = require('puppeteer');
 
     let posted = false;
     for (let attempt = 0; attempt < 8; ++attempt) {
-      const btnEls = await page.$$('div[role="button"],button');
-      let enabledBtn = null;
-      for (const btn of btnEls) {
-        const text = await page.evaluate(el => el.innerText || '', btn);
-        const disabled = await page.evaluate(el => el.disabled || el.getAttribute("aria-disabled") === "true", btn);
-        if (/^(Post|Tweet)$/i.test(text.trim()) && !disabled) {
-          enabledBtn = btn;
-          break;
+      // Try robust explicit selector FIRST:
+      let enabledBtn = await page.$('div[data-testid="tweetButton"][role="button"]:not([aria-disabled="true"]), button[data-testid="tweetButton"]:not([aria-disabled="true"])');
+    
+      // Fallback: Try your old way (scan for visible Post/Tweet text)
+      if (!enabledBtn) {
+        const btnEls = await page.$$('div[role="button"],button');
+        for (const btn of btnEls) {
+          const text = await page.evaluate(el => el.innerText || '', btn);
+          const disabled = await page.evaluate(el => el.disabled || el.getAttribute("aria-disabled") === "true", btn);
+          if (/^(Post|Tweet)$/i.test(text.trim()) && !disabled) {
+            enabledBtn = btn;
+            break;
+          }
         }
       }
-      let enabledBtn = await page.$('div[data-testid="tweetButton"][role="button"]:not([aria-disabled="true"]), button[data-testid="tweetButton"]:not([aria-disabled="true"])');
+    
       if (enabledBtn) {
-          await enabledBtn.click();
-          posted = true;
-          await page.screenshot({path: '/tmp/twitter_after_post_click.png'});
-          break;
+        await enabledBtn.click();
+        posted = true;
+        await page.screenshot({path: '/tmp/twitter_after_post_click.png'});
+        break;
       }
       console.log(`Attempt ${attempt+1}: No enabled Post/Tweet button found, retrying…`);
       await sleep(2000);
