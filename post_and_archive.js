@@ -6,9 +6,8 @@ const puppeteer = require('puppeteer');
 (async () => {
   function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-  const HOME = process.env.HOME;
-  const IMAGE_DIR = path.join(HOME, 'twitter_images');
-  const COUNTER_FILE = path.join(IMAGE_DIR, '.twitter_post_index');
+  const IMAGE_DIR = process.env.TWITTER_IMAGE_DIR || "/workspace/twitter_images";
+  const COUNTER_FILE = path.join(IMAGE_DIR, ".twitter_post_index");
 
   // Get (and sort) image and video files
   const files = fs.readdirSync(IMAGE_DIR)
