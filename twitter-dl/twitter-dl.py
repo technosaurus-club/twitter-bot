@@ -6,8 +6,9 @@ Twitter/X media downloader using yt-dlp.
 Features:
 - Accepts one or more Tweet URLs
 - Downloads attached images or videos
-- Saves to a specified output directory
+- Saves to a specified output directory (always in root, no subfolders)
 - Optional cookies.txt support for private/age-restricted content
+- Automatically cleans URLs to remove query parameters and normalize domains
 
 Configuration:
 - Edit DEFAULT_OUTPUT_DIR, DEFAULT_URLS_FILE, DEFAULT_COOKIES_PATH below to set your preferred folders.
@@ -22,26 +23,62 @@ Notes:
 - Install dependency: pip install yt-dlp
 - For best video quality, install ffmpeg: sudo apt install ffmpeg
 - The script automatically detects ffmpeg and uses it when available
+- All files are saved directly to the output directory without creating subfolders
 """
 
 # === CONFIGURATION (Edit these to your liking) ===
-DEFAULT_OUTPUT_DIR   = "/workspace/twitter_images"
-DEFAULT_URLS_FILE    = "/workspace/twitter_images/StuffToDl.txt"
+DEFAULT_OUTPUT_DIR   = "/home/flerf/twitter_images"
+DEFAULT_URLS_FILE    = "/home/flerf/twitter_images/StuffToDl.txt"
 DEFAULT_COOKIES_PATH = ""  # Set to a path if you want to use cookies.txt
 
 # =================================================
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
 from typing import Iterable, List
+from urllib.parse import urlparse
 
 try:
     import yt_dlp  # type: ignore
 except Exception:  # noqa: BLE001
     yt_dlp = None  # Fallback to external binary
+
+
+def clean_twitter_url(url: str) -> str:
+    """
+    Clean and normalize Twitter/X URLs.
+    - Convert x.com to twitter.com for compatibility
+    - Remove query parameters (?t=...&s=... etc.)
+    - Ensure proper format: https://twitter.com/username/status/id
+    """
+    url = url.strip()
+
+    # Replace x.com with twitter.com
+    url = re.sub(r'^https?://x\.com/', 'https://twitter.com/', url)
+
+    # Parse URL to remove query parameters
+    parsed = urlparse(url)
+
+    # Rebuild URL without query parameters
+    clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+
+    # Ensure it starts with https://twitter.com
+    if not clean_url.startswith('https://twitter.com/'):
+        # Try to fix common variations
+        if clean_url.startswith('http://twitter.com/'):
+            clean_url = clean_url.replace('http://', 'https://')
+        elif 'twitter.com' in clean_url and '/status/' in clean_url:
+            # Extract the important parts if the URL is malformed
+            match = re.search(r'twitter\.com/([^/]+)/status/(\d+)', clean_url)
+            if match:
+                username, tweet_id = match.groups()
+                clean_url = f"https://twitter.com/{username}/status/{tweet_id}"
+
+    return clean_url
 
 
 def read_targets(targets: List[str]) -> List[str]:
@@ -52,17 +89,26 @@ def read_targets(targets: List[str]) -> List[str]:
             expanded.extend(read_urls_file(target))
         else:
             expanded.append(target)
-    # Filter empties and duplicates while preserving order
+
+    # Clean and filter URLs
+    cleaned: List[str] = []
     seen = set()
-    deduped: List[str] = []
+
     for u in expanded:
         u = u.strip()
         if not u or u.startswith("#"):
             continue
-        if u not in seen:
-            seen.add(u)
-            deduped.append(u)
-    return deduped
+
+        # Clean the URL
+        clean_url = clean_twitter_url(u)
+
+        # Skip duplicates
+        if clean_url not in seen:
+            seen.add(clean_url)
+            cleaned.append(clean_url)
+            print(f"Cleaned URL: {u} -> {clean_url}")
+
+    return cleaned
 
 
 def is_probable_file(path: str) -> bool:
@@ -100,8 +146,9 @@ def download_items(
     """Download media for the given URLs using yt-dlp, fall back to gallery-dl for images."""
     os.makedirs(output_dir, exist_ok=True)
 
-    # Common settings
-    outtmpl = os.path.join(output_dir, "%(title).200B.%(ext)s")
+    # Modified output template to avoid subfolders and use tweet ID + title
+    # This ensures files go directly to the root output directory
+    outtmpl = os.path.join(output_dir, "%(id)s_%(title).100B.%(ext)s")
     format_str = "bestvideo+bestaudio/best" if merge_audio else "best"
     success_count = 0
 
@@ -117,6 +164,9 @@ def download_items(
             "writeinfojson": write_info_json,
             "writethumbnail": write_thumbnail,
             "keep_fragments": keep_fragments,
+            # Prevent yt-dlp from creating subdirectories
+            "restrictfilenames": True,
+            "windowsfilenames": True,
         }
         if cookies_path:
             ydl_opts["cookiefile"] = cookies_path
@@ -135,7 +185,8 @@ def download_items(
                     # If yt-dlp indicates no video, try gallery-dl for images
                     if "No video could be found in this tweet" in error_msg:
                         print(f"=== No video found, trying gallery-dl (image): {url}")
-                        gd_args = ["gallery-dl", url, "-d", output_dir]
+                        # Use gallery-dl with flat directory structure
+                        gd_args = ["gallery-dl", url, "-d", output_dir, "--filename", "{tweet_id}_{num}.{extension}"]
                         if cookies_path:
                             gd_args.extend(["--cookies", cookies_path])
                         gd_result = subprocess.run(gd_args, check=False)
@@ -164,6 +215,8 @@ def download_items(
         "--retries", "5",
         "--fragment-retries", "10",
         "--skip-unavailable-fragments",
+        "--restrict-filenames",  # Prevent special characters that might create folders
+        "--windows-filenames",   # Additional safety for filename restrictions
     ]
     if write_info_json:
         base_args.append("--write-info-json")
@@ -185,7 +238,8 @@ def download_items(
                 print(f"Download failed with code {result.returncode} for {url}", file=sys.stderr)
                 if "No video could be found in this tweet" in result.stderr:
                     print(f"=== No video found, trying gallery-dl (image): {url}")
-                    gd_args = ["gallery-dl", url, "-d", output_dir]
+                    # Use gallery-dl with flat directory structure
+                    gd_args = ["gallery-dl", url, "-d", output_dir, "--filename", "{tweet_id}_{num}.{extension}"]
                     if cookies_path:
                         gd_args.extend(["--cookies", cookies_path])
                     gd_result = subprocess.run(gd_args, check=False)
@@ -228,6 +282,9 @@ def main(argv: List[str]) -> int:
     if not urls:
         print("No URLs to process.", file=sys.stderr)
         return 2
+
+    print(f"\nProcessing {len(urls)} cleaned URLs...")
+    print(f"All files will be saved to: {args.output}")
 
     # Determine merge_audio setting
     merge_audio = not args.no_merge_audio

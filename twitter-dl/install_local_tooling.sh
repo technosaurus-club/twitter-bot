@@ -37,24 +37,22 @@ chmod +x "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
 
 echo "ffmpeg version: $($BIN_DIR/ffmpeg -version | head -n1)"
 
-# 3) Ensure pip is installed
-if ! command -v pip3 >/dev/null 2>&1; then
-  echo "Installing pip3 ..."
-  apt-get update
-  apt-get install -y python3-pip
-fi
+# 3) Python tooling (optional but recommended for module mode and gallery-dl fallback)
+apt-get update -y
+apt-get install -y python3-pip python3-venv  # provides pip and venv [web:52]
 
-# 4) Install gallery-dl via pip
-echo "Installing gallery-dl via pip3 ..."
-pip3 install --upgrade --user gallery-dl
+# Use a project-local virtualenv to avoid system Python pollution
+VENV_DIR="$SCRIPT_DIR/.venv"
+python3 -m venv "$VENV_DIR"
+# shellcheck disable=SC1090
+source "$VENV_DIR/bin/activate"
+python3 -m pip install --upgrade pip setuptools wheel  # keep tooling current
+python3 -m pip install yt-dlp gallery-dl  # Python modules for module-mode + image fallback [web:40][web:46]
 
-# Optional: Add gallery-dl to ./bin for local usage (symlink)
-GDL_BIN="$(python3 -m site --user-base)/bin/gallery-dl"
-if [[ -f "$GDL_BIN" ]]; then
-  ln -sf "$GDL_BIN" "$BIN_DIR/gallery-dl"
-fi
-"$BIN_DIR/gallery-dl" --version || true
-
+# Provide shims so calls find local tools first when invoked by scripts
+# Note: Your Python script already prefers ./bin first for external binaries.
+echo 'export PATH="'"$BIN_DIR"':$PATH"' > "$SCRIPT_DIR/env.sh"
+echo "Created $SCRIPT_DIR/env.sh. Source it to prefer local binaries:  source \"$SCRIPT_DIR/env.sh\""
 echo "Done. Local tools installed in $BIN_DIR"
 echo "To use them automatically, the Python script already checks ./bin first."
 echo "You can also add to PATH in this shell: export PATH=\"$BIN_DIR:$PATH\""
